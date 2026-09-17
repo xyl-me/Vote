@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+cryptography
+pytest
+requests
+allure-pytest
+playwright
+pytest-playwright

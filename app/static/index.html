@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>极简投票系统</title>
+<style>
+  body{font-family:system-ui,"Microsoft YaHei",sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#222}
+  button{margin:2px;padding:5px 12px;cursor:pointer}
+  input{padding:5px;margin:2px 0}
+  .card{border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0}
+  .muted{color:#888;font-size:13px}
+  .ok{color:#15803d}
+  .err{color:#b91c1c}
+  .bar{background:#eee;height:10px;border-radius:5px;overflow:hidden;margin-top:4px}
+  .bar>i{display:block;height:100%;background:#3b82f6}
+</style>
+</head>
+<body>
+<h1>极简投票系统</h1>
+
+<div class="card" id="auth-panel">
+  <input id="username" placeholder="用户名">
+  <input id="password" type="password" placeholder="密码">
+  <button id="btn-register" onclick="register()">注册</button>
+  <button id="btn-login" onclick="login()">登录</button>
+</div>
+
+<div class="card" id="main-panel" style="display:none">
+  <b id="who"></b>
+  <button id="btn-logout" onclick="logout()">退出</button>
+
+  <h3>创建问卷</h3>
+  <input id="survey-title" placeholder="问卷标题">
+  <button id="btn-create" onclick="createSurvey()">创建</button>
+  <span id="create-msg"></span>
+
+  <h3>投票</h3>
+  <input id="survey-id" placeholder="问卷 ID">
+  <button id="btn-load" onclick="loadSurvey()">加载</button>
+  <span id="survey-info" class="muted"></span>
+  <div>
+    <input id="option" placeholder="选项，如 A / B / C">
+    <button id="btn-cast" onclick="castVote()">提交投票</button>
+  </div>
+  <div id="vote-msg"></div>
+
+  <h3>结果</h3>
+  <button id="btn-results" onclick="showResults()">查看结果</button>
+  <div id="results"></div>
+</div>
+
+<div id="msg" class="err"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = localStorage.getItem('token') || '';
+
+function msg(text, ok, target) {
+  const el = $(target || 'msg');
+  el.textContent = text || '';
+  el.className = ok ? 'ok' : 'err';
+}
+
+async function api(path, method, body) {
+  const opt = {method: method || 'GET', headers: {'Content-Type': 'application/json'}};
+  if (token) opt.headers.Authorization = 'Bearer ' + token;
+  if (body) opt.body = JSON.stringify(body);
+  const res = await fetch(path, opt);
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data && typeof data.detail === 'string' ? data.detail : JSON.stringify(data));
+  }
+  return data;
+}
+
+async function register() {
+  try {
+    const d = await api('/auth/register', 'POST', {username: $('username').value, password: $('password').value});
+    token = d.access_token;
+    localStorage.setItem('token', token);
+    msg('注册成功', true);
+    showMain();
+  } catch (e) { msg('注册失败：' + e.message); }
+}
+
+async function login() {
+  try {
+    const d = await api('/auth/login', 'POST', {username: $('username').value, password: $('password').value});
+    token = d.access_token;
+    localStorage.setItem('token', token);
+    msg('登录成功', true);
+    showMain();
+  } catch (e) { msg('登录失败：' + e.message); }
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('token');
+  $('main-panel').style.display = 'none';
+  $('auth-panel').style.display = 'block';
+  msg('');
+}
+
+async function showMain() {
+  if (!token) return;
+  try {
+    const me = await api('/auth/me');
+    $('who').textContent = me.username + '（id=' + me.id + '）';
+    $('auth-panel').style.display = 'none';
+    $('main-panel').style.display = 'block';
+  } catch (e) { logout(); }
+}
+
+async function createSurvey() {
+  try {
+    const s = await api('/vote/create', 'POST', {title: $('survey-title').value});
+    $('survey-id').value = s.id;
+    msg('问卷 #' + s.id + ' 创建成功', true, 'create-msg');
+  } catch (e) { msg('创建失败：' + e.message, false, 'create-msg'); }
+}
+
+async function loadSurvey() {
+  try {
+    const r = await api('/vote/' + $('survey-id').value + '/results');
+    $('survey-info').textContent = '《' + r.title + '》当前 ' + r.total + ' 票';
+    msg('问卷加载成功', true, 'vote-msg');
+  } catch (e) { msg('加载失败：' + e.message, false, 'vote-msg'); }
+}
+
+async function castVote() {
+  try {
+    const r = await api('/vote/' + $('survey-id').value + '/cast', 'POST', {option: $('option').value});
+    msg(r.message, true, 'vote-msg');
+  } catch (e) { msg('投票失败：' + e.message, false, 'vote-msg'); }
+}
+
+async function showResults() {
+  try {
+    const r = await api('/vote/' + $('survey-id').value + '/results');
+    $('results').innerHTML = '<p>《' + r.title + '》共 ' + r.total + ' 票</p>' +
+      r.options.map(o => '<div>' + o.option + '：' + o.count + ' 票（' + o.percent + '%）' +
+        '<div class="bar"><i style="width:' + o.percent + '%"></i></div></div>').join('');
+  } catch (e) { msg('查看结果失败：' + e.message); }
+}
+
+showMain();
+</script>
+</body>
+</html>

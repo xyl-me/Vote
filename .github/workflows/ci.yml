@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  api-and-ui-tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: voting
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 启动应用
+        env:
+          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/voting?charset=utf8mb4
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > app.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+      - name: 运行接口 + UI 自动化测试
+        # 用例失败会让本步骤失败（CI 变红 = 阻断），但后续步骤用 if: always() 仍会产出报告
+        # --screenshot/--tracing 产出 UI 失败现场，便于定位
+        run: |
+          pytest --alluredir=allure-results \
+                 --screenshot=only-on-failure \
+                 --full-page-screenshot \
+                 --tracing=retain-on-failure \
+                 --output=test-results
+
+      - name: 安装 Allure CLI
+        if: always()
+        run: npm install -g allure-commandline --silent
+
+      - name: 生成 Allure HTML 报告
+        if: always()
+        run: allure generate allure-results -o allure-report --clean
+
+      - name: 上传 Allure 报告（HTML + 原始结果 + UI 失败现场）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: |
+            allure-report
+            allure-results
+            test-results
+          retention-days: 14
