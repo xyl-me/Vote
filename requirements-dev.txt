@@ -1,0 +1,8 @@
+# 测试依赖（本地跑用例 / CI 安装，不进生产镜像）
+-r requirements.txt
+
+pytest
+requests
+allure-pytest
+playwright
+pytest-playwright

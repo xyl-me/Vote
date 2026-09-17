@@ -44,8 +44,8 @@ curl http://localhost:8000/health     # {"status":"ok"}
 ### 跑测试（可选）
 
 ```bash
-pip install -r requirements.txt
-playwright install chromium          # UI 用例需要浏览器
+pip install -r requirements-dev.txt   # 运行依赖 + 测试依赖（生产镜像只需 requirements.txt）
+playwright install chromium           # UI 用例需要浏览器
 
 pytest                                # 接口 47 + UI 10 用例，结果写入 allure-results
 allure serve allure-results           # 查看 Allure 报告
@@ -143,21 +143,22 @@ votes   (id, survey_id, user_id, option)
 
 `.github/workflows/ci.yml`：push / PR 触发，链路如下
 
-1. 启动 MySQL 8 service（healthcheck 就绪后才进入下一步）
-2. `pip install -r requirements.txt` + `playwright install --with-deps chromium`
-3. 启动应用并轮询 `/health` 探活
-4. 执行接口 + UI 用例：**用例失败 → 本步骤失败 → CI 变红（阻断）**，同时带
+1. `docker compose up -d --build` 一键起服务，轮询 `/health` 探活（失败则打印容器日志并中止）
+   —— 等于把「clone 后一键跑通」这条路径也纳入 CI 验证
+2. `pip install -r requirements-dev.txt` + `playwright install --with-deps chromium`
+3. 执行接口 + UI 用例：**用例失败 → 本步骤失败 → CI 变红（阻断）**，同时带
    `--screenshot=only-on-failure --tracing=retain-on-failure` 保留 UI 失败现场
-5. `allure generate` 生成 **HTML 报告**
-6. 上传产物 `allure-report`，保留 14 天
+4. `allure generate` 生成 **HTML 报告**
+5. 收集容器日志，上传产物（保留 14 天），最后 `docker compose down -v`
 
 产物内容：
 
-| 目录 | 用途 |
+| 目录/文件 | 用途 |
 | --- | --- |
 | `allure-report/` | 可直接打开的 HTML 报告（`index.html`：总览 + 用例明细 + 请求响应附件） |
 | `allure-results/` | Allure 原始结果，供二次分析或本地重新生成 |
 | `test-results/` | UI 失败截图（`test-failed-*.png`）与 Playwright trace（`trace.zip`，可拖到 trace.playwright.dev 回放） |
+| `compose-logs.txt` | 容器日志，服务启动异常时用于定位 |
 
 > 说明：仅上传 `allure-results` 是不够的 —— 那是一堆 uuid 命名的 JSON/附件，必须本地装 Allure CLI + Java
 > 才能生成报告；因此 CI 内直接产出 HTML，评审/同事点开即可看。
@@ -182,9 +183,10 @@ voting-system/
 │       ├── conftest.py     # Playwright 相关夹具与页面辅助
 │       ├── test_ui_login.py
 │       └── test_ui_vote.py
-├── docker-compose.yml      # MySQL + app（无 Redis）
+├── docker-compose.yml      # MySQL + app（无 Redis，healthcheck 就绪依赖）
 ├── Dockerfile
-├── requirements.txt
+├── requirements.txt        # 运行依赖（生产镜像）
+├── requirements-dev.txt    # 测试依赖（pytest / requests / allure / playwright）
 ├── pytest.ini              # testpaths + --alluredir
 └── README.md
 ```

@@ -8,16 +8,6 @@ on:
 jobs:
   api-and-ui-tests:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: voting
-        ports: ["3306:3306"]
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval=5s --health-timeout=5s --health-retries=20
 
     steps:
       - uses: actions/checkout@v4
@@ -27,25 +17,31 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: 安装依赖
+      # 用 docker compose 起服务：既跑测试，也顺带验证「clone 后一键跑通」这条路径
+      - name: 一键启动服务（docker compose）
         run: |
-          pip install -r requirements.txt
+          docker compose up -d --build
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/health; then
+              echo "服务已就绪"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::服务在 180 秒内未就绪"
+          docker compose ps
+          docker compose logs --no-color --tail 100
+          exit 1
+
+      - name: 安装测试依赖与浏览器
+        run: |
+          pip install -r requirements-dev.txt
           playwright install --with-deps chromium
 
-      - name: 启动应用
-        env:
-          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/voting?charset=utf8mb4
-        run: |
-          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > app.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/health && break
-            sleep 2
-          done
-          curl -sf http://127.0.0.1:8000/health
-
       - name: 运行接口 + UI 自动化测试
-        # 用例失败会让本步骤失败（CI 变红 = 阻断），但后续步骤用 if: always() 仍会产出报告
-        # --screenshot/--tracing 产出 UI 失败现场，便于定位
+        # 用例失败 → 本步骤失败 → CI 变红（阻断）；后续步骤用 if: always() 保证仍产出报告
+        env:
+          BASE_URL: http://localhost:8000
         run: |
           pytest --alluredir=allure-results \
                  --screenshot=only-on-failure \
@@ -61,7 +57,11 @@ jobs:
         if: always()
         run: allure generate allure-results -o allure-report --clean
 
-      - name: 上传 Allure 报告（HTML + 原始结果 + UI 失败现场）
+      - name: 收集容器日志（排查用）
+        if: always()
+        run: docker compose logs --no-color > compose-logs.txt || true
+
+      - name: 上传 Allure 报告与排查材料
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -70,4 +70,9 @@ jobs:
             allure-report
             allure-results
             test-results
+            compose-logs.txt
           retention-days: 14
+
+      - name: 停止服务
+        if: always()
+        run: docker compose down -v

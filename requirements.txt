@@ -1,10 +1,6 @@
+# 运行依赖（生产镜像只装这些）
 fastapi
 uvicorn[standard]
 sqlalchemy
 pymysql
 cryptography
-pytest
-requests
-allure-pytest
-playwright
-pytest-playwright
